@@ -63,7 +63,7 @@ if __name__ == '__main__':
     num_proc = cpu_count()
 
     if args.demo:
-        prompts = read_train_examples(load_dataset("mbpp", split="train[:16]", num_proc=num_proc), load_dataset("mbpp", split="prompt[:3]", num_proc=num_proc))
+        prompts = read_train_examples(load_dataset("mbpp", split="train[:32]", num_proc=num_proc), load_dataset("mbpp", split="prompt[:3]", num_proc=num_proc))
     else:
         prompts = read_train_examples(load_dataset("mbpp", split="train", num_proc=num_proc), load_dataset("mbpp", split="prompt[:3]", num_proc=num_proc))
 
@@ -80,7 +80,6 @@ if __name__ == '__main__':
 
         logger.info(f"generating sample {sample}...")
         generations = generator(prompts, return_full_text=False, **generate_kwargs)
-        logger.info(f"generated sample {sample}")
 
         for i, generation in enumerate(generations):
             generated_examples[i] = {"sample": sample, "task_id": 601 + i, "generation": [convert_for_evaluation(generation[0]['generated_text'])]}
@@ -100,22 +99,34 @@ if __name__ == '__main__':
 
         for i, generated_example in enumerate(generated_examples):
             generation = generated_example["generation"][-1]
-            print(generation)
             with open(filename, 'w') as file:
                 print(generation, file=file)
             output = run(command, capture_output=True)
             if output.returncode != 0:
-                print(output.stderr.decode())
                 output = output.stderr.decode()[18:]
                 try:
                     index2new_prompt[i] = prompts[i] + "```python\n" + '\n'.join(generation.splitlines()[:int(output[:output.find(':')]) - 1]) + '\n'
                 except ValueError:
                     index2new_prompt[i] = prompts[i] + "```python\n"
 
+        for attempt in range(1, args.num_attempts):
+            generations = generator(index2new_prompt.values(), **generate_kwargs)
 
-        # for attempt in range(1, args.num_attempts):
-        #
-        #     for index in indexes:
+            for i, index in enumerate(index2new_prompt.keys()):
+                generation = generations[i][0]['generated_text'][len(prompts[index]):]
+                generated_examples[index]["generation"].append(convert_for_evaluation(generation))
+                with open(filename, 'w') as file:
+                    print(generation, file=file)
+                output = run(command, capture_output=True)
+                if output.returncode == 0:
+                    index2new_prompt.pop(index)
+                    continue
+                output = output.stderr.decode()[18:]
+                try:
+                    index2new_prompt[i] = prompts[i] + "```python\n" + '\n'.join(
+                        generation.splitlines()[:int(output[:output.find(':')]) - 1]) + '\n'
+                except ValueError:
+                    index2new_prompt[i] = prompts[i] + "```python\n"
 
-
-        # write_jsonl("data/mbpp/mbpp_compiler_feedback.jsonl", generated_examples)
+        logger.info(f"generated sample {sample}")
+        write_jsonl("data/mbpp/mbpp_compiler_feedback.jsonl", generated_examples, append=True)
