@@ -45,7 +45,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     num_proc = cpu_count()
-    logger.info(f"loading MBPP dataset...")
+    logger.info("loading MBPP dataset...")
     test_examples = load_dataset("mbpp", split="test", num_proc=num_proc)
     prompt_examples = load_dataset("mbpp", split="prompt[:3]", num_proc=num_proc)
     examples = read_test_examples(test_examples, prompt_examples)

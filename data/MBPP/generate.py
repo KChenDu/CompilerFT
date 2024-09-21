@@ -2,12 +2,12 @@ import argparse
 
 from setting import PROMPT_TEMPLATE, generate_kwargs
 from re import search, DOTALL
-from os import cpu_count
+from pathlib import Path
+from os import cpu_count, remove
 from datasets import load_dataset, Dataset
 from transformers import pipeline, set_seed
 from loguru import logger
 from human_eval.data import write_jsonl
-from pathlib import Path
 from subprocess import run
 
 
@@ -52,7 +52,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     compiler = args.compiler
-
     if compiler == 'Cython':
         from setting import CYTHON_COMMAND as command
     elif compiler == 'Codon':
@@ -60,12 +59,21 @@ if __name__ == '__main__':
     else:
         raise ValueError
 
-    num_proc = cpu_count()
+    if compiler == 'Cython':
+        filename = Path(command[1])
+    elif compiler == 'Codon':
+        filename = Path(command[-1])
+    else:
+        raise ValueError
 
+    num_proc = cpu_count()
+    logger.info("loading MBPP dataset...")
     if args.demo:
-        prompts = read_train_examples(load_dataset("mbpp", split="train[:32]", num_proc=num_proc), load_dataset("mbpp", split="prompt[:3]", num_proc=num_proc))
+        prompts = read_train_examples(load_dataset("mbpp", split="train[:16]", num_proc=num_proc), load_dataset("mbpp", split="prompt[:3]", num_proc=num_proc))
     else:
         prompts = read_train_examples(load_dataset("mbpp", split="train", num_proc=num_proc), load_dataset("mbpp", split="prompt[:3]", num_proc=num_proc))
+    length = len(prompts)
+    logger.info(f"{length} problems loaded from MBPP dataset")
 
     model = args.model
     logger.info(f"loading model from {model}...")
@@ -74,7 +82,6 @@ if __name__ == '__main__':
 
     set_seed(42)
 
-    length = len(prompts)
     for sample in range(args.num_samples_per_task):
         generated_examples = [None] * length
 
@@ -85,15 +92,8 @@ if __name__ == '__main__':
             generated_examples[i] = {"sample": sample, "task_id": 601 + i, "generation": [convert_for_evaluation(generation[0]['generated_text'])]}
 
         if not generate_kwargs["do_sample"]:
-            write_jsonl("data/mbpp/mbpp_compiler_feedback.jsonl", generated_examples)
+            write_jsonl("mbpp_compiler_feedback.jsonl", generated_examples)
             break
-
-        if compiler == 'Cython':
-            filename = command[1]
-        elif compiler == 'Codon':
-            filename = command[-1]
-        else:
-            raise ValueError
 
         index2new_prompt = {}
 
@@ -110,23 +110,33 @@ if __name__ == '__main__':
                     index2new_prompt[i] = prompts[i] + "```python\n"
 
         for attempt in range(1, args.num_attempts):
-            generations = generator(index2new_prompt.values(), **generate_kwargs)
+            if len(index2new_prompt) < 1:
+                break
+            generations = generator(list(index2new_prompt.values()), **generate_kwargs)
+
+            new_index2new_prompt = {}
 
             for i, index in enumerate(index2new_prompt.keys()):
-                generation = generations[i][0]['generated_text'][len(prompts[index]):]
-                generated_examples[index]["generation"].append(convert_for_evaluation(generation))
+                generation = convert_for_evaluation(generations[i][0]['generated_text'][len(prompts[index]):])
+                generated_examples[index]["generation"].append(generation)
                 with open(filename, 'w') as file:
                     print(generation, file=file)
                 output = run(command, capture_output=True)
-                if output.returncode == 0:
-                    index2new_prompt.pop(index)
-                    continue
-                output = output.stderr.decode()[18:]
-                try:
-                    index2new_prompt[i] = prompts[i] + "```python\n" + '\n'.join(
-                        generation.splitlines()[:int(output[:output.find(':')]) - 1]) + '\n'
-                except ValueError:
-                    index2new_prompt[i] = prompts[i] + "```python\n"
+                if output.returncode != 0:
+                    output = output.stderr.decode()[18:]
+                    try:
+                        new_index2new_prompt[index] = prompts[index] + "```python\n" + '\n'.join(generation.splitlines()[:int(output[:output.find(':')]) - 1]) + '\n'
+                    except ValueError:
+                        new_index2new_prompt[index] = prompts[index] + "```python\n"
+            index2new_prompt = new_index2new_prompt
 
         logger.info(f"generated sample {sample}")
-        write_jsonl("data/mbpp/mbpp_compiler_feedback.jsonl", generated_examples, append=True)
+        write_jsonl("mbpp_compiler_feedback.jsonl", generated_examples, append=True)
+
+        # remove(filename)
+        if compiler == "Cython":
+            remove(filename.with_suffix(".cpp"))
+        elif compiler == 'Codon':
+            remove(filename.with_suffix(".ll"))
+        else:
+            raise ValueError
