@@ -1,0 +1,4 @@
+*__pycache__
+.idea*
+demo/test_trainer
+playground.ipynb
