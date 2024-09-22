@@ -1,12 +1,12 @@
 import argparse
 
+from datasets import Dataset, load_dataset
 from setting import PROMPT_TEMPLATE, generate_kwargs
 from re import search, DOTALL
+from loguru import logger
 from pathlib import Path
 from os import cpu_count, remove
-from datasets import load_dataset, Dataset
 from transformers import pipeline, set_seed
-from loguru import logger
 from human_eval.data import write_jsonl
 from subprocess import run
 
@@ -137,10 +137,10 @@ if __name__ == '__main__':
         write_jsonl(root / "mbpp_compiler_feedback.jsonl", generated_examples, append=True)
         logger.info(f"sample {sample} saved")
 
-    remove(filename)
     if compiler == "Cython":
         remove(filename.with_suffix(".cpp"))
     elif compiler == 'Codon':
         remove(filename.with_suffix(".ll"))
     else:
         raise ValueError
+    remove(filename)
