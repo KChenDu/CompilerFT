@@ -60,7 +60,7 @@ if __name__ == '__main__':
     logger.info("generating...")
     generate_kwargs = { #########
         "do_sample": True,
-        "temperature": 0.9,
+        "temperature": 0.1,
         "top_k": 0,
         "top_p": 0.95
     }
