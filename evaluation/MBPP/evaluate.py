@@ -58,7 +58,13 @@ if __name__ == '__main__':
     logger.info(f"model loaded from {model}")
 
     logger.info("generating...")
-    generations = generator(examples, return_full_text=False, max_new_tokens=512)
+    generate_kwargs = { #########
+        "do_sample": True,
+        "temperature": 0.9,
+        "top_k": 0,
+        "top_p": 0.95
+    }
+    generations = generator(examples, return_full_text=False, max_new_tokens=512, **generate_kwargs)
 
     generated_examples = [None] * length
     offset = test_examples[0]['task_id']

@@ -66,6 +66,8 @@ if __name__ == '__main__':
     else:
         raise ValueError
 
+    root = Path(__file__).parent
+
     num_proc = cpu_count()
     logger.info("loading MBPP dataset...")
     if args.demo:
@@ -92,7 +94,7 @@ if __name__ == '__main__':
             generated_examples[i] = {"sample": sample, "task_id": 601 + i, "generation": [convert_for_evaluation(generation[0]['generated_text'])]}
 
         if not generate_kwargs["do_sample"]:
-            write_jsonl("mbpp_compiler_feedback.jsonl", generated_examples)
+            write_jsonl(root / "mbpp_compiler_feedback.jsonl", generated_examples)
             break
 
         index2new_prompt = {}
@@ -129,14 +131,16 @@ if __name__ == '__main__':
                     except ValueError:
                         new_index2new_prompt[index] = prompts[index] + "```python\n"
             index2new_prompt = new_index2new_prompt
+        logger.info(f"sample {sample} generated")
 
-        logger.info(f"generated sample {sample}")
-        write_jsonl("mbpp_compiler_feedback.jsonl", generated_examples, append=True)
+        logger.info(f"saving sample {sample}...")
+        write_jsonl(root / "mbpp_compiler_feedback.jsonl", generated_examples, append=True)
+        logger.info(f"sample {sample} saved")
 
-        # remove(filename)
-        if compiler == "Cython":
-            remove(filename.with_suffix(".cpp"))
-        elif compiler == 'Codon':
-            remove(filename.with_suffix(".ll"))
-        else:
-            raise ValueError
+    remove(filename)
+    if compiler == "Cython":
+        remove(filename.with_suffix(".cpp"))
+    elif compiler == 'Codon':
+        remove(filename.with_suffix(".ll"))
+    else:
+        raise ValueError
