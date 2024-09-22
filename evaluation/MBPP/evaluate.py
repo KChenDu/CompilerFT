@@ -59,27 +59,13 @@ if __name__ == '__main__':
     logger.info(f"model loaded from {model}")
 
     logger.info("generating...")
-    generate_kwargs = { #########
-        "do_sample": True,
-        "temperature": 0.1,
-        "top_k": 0,
-        "top_p": 0.95
-    }
-    generations = generator(examples, return_full_text=False, max_new_tokens=512, **generate_kwargs)
-
-    n_compilable = 0
+    generations = generator(examples, return_full_text=False, max_new_tokens=512)
 
     generated_examples = [None] * length
     offset = test_examples[0]['task_id']
     for i, generation in enumerate(generations):
         generated_examples[i] = dict(task_id=offset + i, generation=convert_for_evaluation(generation[0]['generated_text']))
-        with open('temp.py', 'w') as file:
-            print(convert_for_evaluation(generation[0]['generated_text']), file=file)
-        output = run(("codon", "build", "-release", "-llvm", "generation.py"), capture_output=True)
-        if output.returncode == 0:
-            n_compilable += 1
     logger.info("generation over")
-    print(n_compilable / 500)
 
     root = Path(__file__).parent
     logger.info("saving {} processed examples into {}...".format(length, root / "mbpp_samples.jsonl"))
