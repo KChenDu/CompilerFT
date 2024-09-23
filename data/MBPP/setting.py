@@ -12,7 +12,7 @@ CODON_COMMAND = ("codon", "build", "-release", "-llvm", "generation.py")
 
 generate_kwargs = {
     "do_sample": True,
-    "temperature": 0.9,
+    "temperature": 0.7,
     "max_new_tokens": 1024,
     "top_k": 0,
     "top_p": 0.95

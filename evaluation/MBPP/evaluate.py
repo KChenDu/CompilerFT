@@ -1,19 +1,17 @@
 import argparse
 
-from torch.utils.data import Dataset
-from re import search, DOTALL
+from datasets import Dataset, load_dataset
 from setting import PROMPT_TEMPLATE
-from os import cpu_count
+from re import search, DOTALL
 from loguru import logger
-from datasets import load_dataset
+from os import cpu_count
 from transformers import pipeline
 from pathlib import Path
 from human_eval.data import write_jsonl
 from human_eval.evaluation import evaluate_functional_correctness
-from subprocess import run
 
 
-def read_test_examples(test_examples: Dataset, prompt_examples: Dataset) -> dict:
+def read_test_examples(test_examples: Dataset, prompt_examples: Dataset):
     def format_test_example(q: str, tests: list[str], code: str | None = None):
         prompt = ">>> Problem:\n{}\n>>> Test Cases:\n{}".format(q, '\n'.join(map(str.strip, tests)))
         if code is not None:
@@ -62,9 +60,9 @@ if __name__ == '__main__':
     generations = generator(examples, return_full_text=False, max_new_tokens=512)
 
     generated_examples = [None] * length
-    offset = test_examples[0]['task_id']
+    task_id_offset = test_examples[0]['task_id']
     for i, generation in enumerate(generations):
-        generated_examples[i] = dict(task_id=offset + i, generation=convert_for_evaluation(generation[0]['generated_text']))
+        generated_examples[i] = dict(task_id=task_id_offset + i, generation=convert_for_evaluation(generation[0]['generated_text']))
     logger.info("generation over")
 
     root = Path(__file__).parent

@@ -9,10 +9,11 @@ from os import cpu_count, remove
 from transformers import pipeline, set_seed
 from human_eval.data import write_jsonl
 from subprocess import run
+from human_eval.evaluation import evaluate_functional_correctness
 
 
-def read_train_examples(train_examples: Dataset, prompt_examples: Dataset) -> list[str]:
-    def format_train_example(q: str, tests: list[str], code: str | None = None):
+def read_test_examples(train_examples: Dataset, prompt_examples: Dataset) -> list[str]:
+    def format_test_example(q: str, tests: list[str], code: str | None = None):
         prompt = ">>> Problem:\n{}\n>>> Test Cases:\n{}".format(q, '\n'.join(map(str.strip, tests)))
         if code is not None:
             prompt += f"\n>>> Code:\n```python\n{code.strip()}\n```"
@@ -21,13 +22,13 @@ def read_train_examples(train_examples: Dataset, prompt_examples: Dataset) -> li
     examples_str = [None, None, None]
 
     for i in range(3):
-        example_prompt = format_train_example(prompt_examples[i]['text'], prompt_examples[i]['test_list'], prompt_examples[i]['code'])
+        example_prompt = format_test_example(prompt_examples[i]['text'], prompt_examples[i]['test_list'], prompt_examples[i]['code'])
         examples_str[i] = f'- Example {i + 1}:\n{example_prompt}'
 
     prompts = [None] * len(train_examples)
 
     for i, example in enumerate(train_examples):
-        prompt = format_train_example(example['text'], example['test_list'])
+        prompt = format_test_example(example['text'], example['test_list'])
         prompts[i] = PROMPT_TEMPLATE.format('\n\n'.join(examples_str), prompt)
 
     return prompts
@@ -44,12 +45,9 @@ def convert_for_evaluation(generation: str) -> str:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', default='deepseek-ai/deepseek-coder-1.3b-base', type=str)
-    parser.add_argument('--num_samples_per_task', default=20, type=int)
     parser.add_argument('--num_attempts', default=5, type=int)
     parser.add_argument('--batch_size', default=8, type=int)
     parser.add_argument('--compiler', choices=('Cython', 'Codon'), default='Codon', type=str)
-    parser.add_argument('--sample_offset', default=0, type=int)
-    parser.add_argument('--demo', action='store_true')
     args = parser.parse_args()
 
     compiler = args.compiler
@@ -62,16 +60,11 @@ if __name__ == '__main__':
     else:
         raise ValueError
 
-    root = Path(__file__).parent
-
     num_proc = cpu_count()
     logger.info("loading MBPP dataset...")
-    if args.demo:
-        train_examples = load_dataset("mbpp", split="train[:16]", num_proc=num_proc)
-    else:
-        train_examples = load_dataset("mbpp", split="train", num_proc=num_proc)
+    test_examples = load_dataset("mbpp", split="test", num_proc=num_proc)
     prompt_examples = load_dataset("mbpp", split="prompt[:3]", num_proc=num_proc)
-    prompts = read_train_examples(train_examples, prompt_examples)
+    prompts = read_test_examples(test_examples, prompt_examples)
     length = len(prompts)
     logger.info(f"{length} problems loaded from MBPP dataset")
 
@@ -80,27 +73,20 @@ if __name__ == '__main__':
     generator = pipeline('text-generation', model, device=0, batch_size=args.batch_size, torch_dtype='auto')
     logger.info(f"model loaded from {model}")
 
+    logger.info("generating...")
     set_seed(42)
+    generated_examples = [None] * length
+    generations = generator(prompts, return_full_text=False, max_new_tokens=512, **generate_kwargs)
 
-    task_id_offset = train_examples[0]['task_id']
-    sample_offset = args.sample_offset
-    for sample in range(sample_offset, sample_offset + args.num_samples_per_task):
-        generated_examples = [None] * length
+    task_id_offset = test_examples[0]['task_id']
+    for i, generation in enumerate(generations):
+        generated_examples[i] = dict(task_id=task_id_offset + i, generation=convert_for_evaluation(generation[0]['generated_text']))
 
-        logger.info(f"generating sample {sample}...")
-        generations = generator(prompts, return_full_text=False, **generate_kwargs)
-
-        for i, generation in enumerate(generations):
-            generated_examples[i] = dict(sample=sample, task_id=task_id_offset + i, generation=[convert_for_evaluation(generation[0]['generated_text'])])
-
-        if not generate_kwargs["do_sample"]:
-            write_jsonl(root / "mbpp_compiler_feedback.jsonl", generated_examples)
-            break
-
+    if generate_kwargs["do_sample"]:
         index2new_prompt = {}
 
         for i, generated_example in enumerate(generated_examples):
-            generation = generated_example["generation"][-1]
+            generation = generated_example["generation"]
             with open(filename, 'w') as file:
                 print(generation, file=file)
             output = run(command, capture_output=True)
@@ -114,13 +100,15 @@ if __name__ == '__main__':
         for attempt in range(1, args.num_attempts):
             if len(index2new_prompt) < 1:
                 break
-            generations = generator(list(index2new_prompt.values()), **generate_kwargs)
+            # logger.info("regenerating...")
+            # print(len(index2new_prompt))
+            generations = generator(list(index2new_prompt.values()), max_new_tokens=512, **generate_kwargs)
 
             new_index2new_prompt = {}
 
             for i, index in enumerate(index2new_prompt.keys()):
                 generation = convert_for_evaluation(generations[i][0]['generated_text'][len(prompts[index]):])
-                generated_examples[index]["generation"].append(generation)
+                generated_examples[index]["generation"] = generation
                 with open(filename, 'w') as file:
                     print(generation, file=file)
                 output = run(command, capture_output=True)
@@ -131,16 +119,21 @@ if __name__ == '__main__':
                     except ValueError:
                         new_index2new_prompt[index] = prompts[index] + "```python\n"
             index2new_prompt = new_index2new_prompt
-        logger.info(f"sample {sample} generated")
 
-        logger.info(f"saving sample {sample}...")
-        write_jsonl(root / "mbpp_compiler_feedback.jsonl", generated_examples, append=True)
-        logger.info(f"sample {sample} saved")
+        if compiler == "Cython":
+            remove(filename.with_suffix(".cpp"))
+        elif compiler == 'Codon':
+            remove(filename.with_suffix(".ll"))
+        else:
+            raise ValueError
+        remove(filename)
+        # print((500 - len(index2new_prompt)) / 500)
+    logger.info("generation over")
 
-    if compiler == "Cython":
-        remove(filename.with_suffix(".cpp"))
-    elif compiler == 'Codon':
-        remove(filename.with_suffix(".ll"))
-    else:
-        raise ValueError
-    remove(filename)
+    root = Path(__file__).parent
+    logger.info("saving {} processed examples into {}...".format(length, root / "mbpp_samples.jsonl"))
+    write_jsonl(root / "mbpp_samples.jsonl", generated_examples)
+    logger.info("saved {} processed examples into {}".format(length, root / "mbpp_samples.jsonl"))
+
+    result = evaluate_functional_correctness(str(root / "mbpp_samples.jsonl"), problem_file=str(root / "data" / "mbpp_test.jsonl"), is_mbpp=True)
+    print(result)
