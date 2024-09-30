@@ -43,10 +43,10 @@ def convert_for_evaluation(generation: str) -> str:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', default='deepseek-ai/deepseek-coder-1.3b-base', type=str)
+    parser.add_argument('--model', default='deepseek-ai/deepseek-coder-1.3b-instruct', type=str)
     parser.add_argument('--num_samples_per_task', default=20, type=int)
-    parser.add_argument('--num_attempts', default=5, type=int)
-    parser.add_argument('--batch_size', default=8, type=int)
+    parser.add_argument('--num_attempts', default=10, type=int)
+    parser.add_argument('--batch_size', default=16, type=int)
     parser.add_argument('--compiler', choices=('Cython', 'Codon'), default='Codon', type=str)
     parser.add_argument('--sample_offset', default=0, type=int)
     parser.add_argument('--demo', action='store_true')
@@ -88,14 +88,15 @@ if __name__ == '__main__':
         generated_examples = [None] * length
 
         logger.info(f"generating sample {sample}...")
-        generations = generator(prompts, return_full_text=False, **generate_kwargs)
+        generations = generator(prompts, max_new_tokens=1024, return_full_text=False, **generate_kwargs)
 
         for i, generation in enumerate(generations):
             generated_examples[i] = dict(sample=sample, task_id=task_id_offset + i, generation=[convert_for_evaluation(generation[0]['generated_text'])])
 
         if not generate_kwargs["do_sample"]:
+            logger.info("generation over")
             write_jsonl(root / "mbpp_compiler_feedback.jsonl", generated_examples)
-            break
+            exit()
 
         index2new_prompt = {}
 
@@ -114,7 +115,7 @@ if __name__ == '__main__':
         for attempt in range(1, args.num_attempts):
             if len(index2new_prompt) < 1:
                 break
-            generations = generator(list(index2new_prompt.values()), **generate_kwargs)
+            generations = generator(list(index2new_prompt.values()), max_new_tokens=1024, **generate_kwargs)
 
             new_index2new_prompt = {}
 

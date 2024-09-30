@@ -39,7 +39,7 @@ def convert_for_evaluation(generation: str) -> str:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', default="deepseek-ai/deepseek-coder-1.3b-base", type=str)
+    parser.add_argument('--model', default="deepseek-ai/deepseek-coder-1.3b-instruct", type=str)
     parser.add_argument('--batch_size', default=8, type=int)
     args = parser.parse_args()
 

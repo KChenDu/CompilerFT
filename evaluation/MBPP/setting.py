@@ -7,12 +7,12 @@ Here is my problem:
 >>> Code:
 '''
 
-CYTHON_COMMAND = ("cython", "generation.py", "-+", "--3")
+CYTHON_COMMAND = ("cython", "generationn.py", "-+", "--3")
 CODON_COMMAND = ("codon", "build", "-release", "-llvm", "generationn.py")
 
 generate_kwargs = {
     "do_sample": True,
-    "temperature": 0.1,
+    "temperature": 0.7,
     "top_k": 0,
     "top_p": 0.95
 }

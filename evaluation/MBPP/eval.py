@@ -60,8 +60,8 @@ if __name__ == '__main__':
     else:
         raise ValueError
 
-    num_proc = cpu_count()
     logger.info("loading MBPP dataset...")
+    num_proc = cpu_count()
     test_examples = load_dataset("mbpp", split="test", num_proc=num_proc)
     prompt_examples = load_dataset("mbpp", split="prompt[:3]", num_proc=num_proc)
     prompts = read_test_examples(test_examples, prompt_examples)
@@ -76,32 +76,41 @@ if __name__ == '__main__':
     logger.info("generating...")
     set_seed(42)
     generated_examples = [None] * length
-    generations = generator(prompts, return_full_text=False, max_new_tokens=512, **generate_kwargs)
+    generations = generator(prompts, max_new_tokens=512, return_full_text=False, **generate_kwargs)
 
     task_id_offset = test_examples[0]['task_id']
     for i, generation in enumerate(generations):
         generated_examples[i] = dict(task_id=task_id_offset + i, generation=convert_for_evaluation(generation[0]['generated_text']))
+    logger.info("generation over")
+    
+    index2new_prompt = {}
 
+    for i, generated_example in enumerate(generated_examples):
+        generation = generated_example["generation"]
+        with open(filename, 'w') as file:
+            print(generation, file=file)
+        output = run(command, capture_output=True)
+        if output.returncode != 0:
+            output = output.stderr.decode()[18:]
+            try:
+                index2new_prompt[i] = prompts[i] + "```python\n" + '\n'.join(generation.splitlines()[:int(output[:output.find(':')]) - 1]) + '\n'
+            except ValueError:
+                index2new_prompt[i] = prompts[i] + "```python\n"
+
+    print("compilability:", (length - len(index2new_prompt)) / length)
+    root = Path(__file__).parent
+    write_jsonl(root / "mbpp_samples.jsonl", generated_examples)
+    result, results = evaluate_functional_correctness(str(root / "mbpp_samples.jsonl"), problem_file=str(root / "data" / "mbpp_test.jsonl"), is_mbpp=True)
+    print("MBPP test score:", result)
+    for r in results:
+        if r[0][1]["passed"] and r[0][1]["task_id"] - task_id_offset in index2new_prompt:
+            index2new_prompt.pop(r[0][1]["task_id"] - task_id_offset)
+    
     if generate_kwargs["do_sample"]:
-        index2new_prompt = {}
-
-        for i, generated_example in enumerate(generated_examples):
-            generation = generated_example["generation"]
-            with open(filename, 'w') as file:
-                print(generation, file=file)
-            output = run(command, capture_output=True)
-            if output.returncode != 0:
-                output = output.stderr.decode()[18:]
-                try:
-                    index2new_prompt[i] = prompts[i] + "```python\n" + '\n'.join(generation.splitlines()[:int(output[:output.find(':')]) - 1]) + '\n'
-                except ValueError:
-                    index2new_prompt[i] = prompts[i] + "```python\n"
-
         for attempt in range(1, args.num_attempts):
+            logger.info("regenerating...")
             if len(index2new_prompt) < 1:
                 break
-            # logger.info("regenerating...")
-            # print(len(index2new_prompt))
             generations = generator(list(index2new_prompt.values()), max_new_tokens=512, **generate_kwargs)
 
             new_index2new_prompt = {}
@@ -118,7 +127,14 @@ if __name__ == '__main__':
                         new_index2new_prompt[index] = prompts[index] + "```python\n" + '\n'.join(generation.splitlines()[:int(output[:output.find(':')]) - 1]) + '\n'
                     except ValueError:
                         new_index2new_prompt[index] = prompts[index] + "```python\n"
+                
             index2new_prompt = new_index2new_prompt
+            logger.info("regeneration over")
+            write_jsonl(root / "mbpp_samples.jsonl", generated_examples)
+            _, results = evaluate_functional_correctness(str(root / "mbpp_samples.jsonl"), problem_file=str(root / "data" / "mbpp_test.jsonl"), is_mbpp=True)
+            for r in results:
+                if r[0][1]["passed"] and r[0][1]["task_id"] - task_id_offset in index2new_prompt:
+                    index2new_prompt.pop(r[0][1]["task_id"] - task_id_offset)
 
         if compiler == "Cython":
             remove(filename.with_suffix(".cpp"))
@@ -127,13 +143,11 @@ if __name__ == '__main__':
         else:
             raise ValueError
         remove(filename)
-        # print((500 - len(index2new_prompt)) / 500)
-    logger.info("generation over")
 
-    root = Path(__file__).parent
     logger.info("saving {} processed examples into {}...".format(length, root / "mbpp_samples.jsonl"))
     write_jsonl(root / "mbpp_samples.jsonl", generated_examples)
     logger.info("saved {} processed examples into {}".format(length, root / "mbpp_samples.jsonl"))
 
-    result = evaluate_functional_correctness(str(root / "mbpp_samples.jsonl"), problem_file=str(root / "data" / "mbpp_test.jsonl"), is_mbpp=True)
-    print(result)
+    result, _ = evaluate_functional_correctness(str(root / "mbpp_samples.jsonl"), problem_file=str(root / "data" / "mbpp_test.jsonl"), is_mbpp=True)
+    print("compilability:", (500 - len(index2new_prompt)) / 500)
+    print("MBPP test score:", result)
