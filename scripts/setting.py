@@ -6,3 +6,6 @@ Here is my problem:
 {}
 >>> Code:
 '''
+
+CYTHON_COMMAND = ("cython", "generationn.py", "-+", "--3")
+CODON_COMMAND = ("codon", "build", "-release", "-llvm", "generationn.py")

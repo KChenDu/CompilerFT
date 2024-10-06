@@ -17,8 +17,6 @@ def read_train_examples(train_examples: Dataset, prompt_examples: Dataset) -> li
         example_prompt = format_train_example(prompt_examples[i]['text'], prompt_examples[i]['test_list'], prompt_examples[i]['code'])
         examples_str[i] = f'- Example {i + 1}:\n{example_prompt}'
 
-    prompts = [None] * len(train_examples)
-
     for i, example in enumerate(train_examples):
         prompt = format_train_example(example['text'], example['test_list'])
         prompt = PROMPT_TEMPLATE.format('\n\n'.join(examples_str), prompt)
