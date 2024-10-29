@@ -44,8 +44,8 @@ def convert_for_evaluation(generation: str) -> str:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', default='deepseek-ai/deepseek-coder-1.3b-instruct', type=str)
-    parser.add_argument('--num_samples_per_task', default=20, type=int)
-    parser.add_argument('--num_attempts', default=10, type=int)
+    parser.add_argument('--num_samples_per_task', default=100, type=int)
+    parser.add_argument('--num_attempts', default=5, type=int)
     parser.add_argument('--batch_size', default=16, type=int)
     parser.add_argument('--compiler', choices=('Cython', 'Codon'), default='Codon', type=str)
     parser.add_argument('--sample_offset', default=0, type=int)
@@ -80,7 +80,7 @@ if __name__ == '__main__':
     generator = pipeline('text-generation', model, device=0, batch_size=args.batch_size, torch_dtype='auto')
     logger.info(f"model loaded from {model}")
 
-    set_seed(42)
+    set_seed(84)
 
     task_id_offset = train_examples[0]['task_id']
     sample_offset = args.sample_offset
