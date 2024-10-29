@@ -107,7 +107,7 @@ if __name__ == '__main__':
             else:
                 for attempt in generations:
                     compiler_dpo_dataset_dict["prompt"].append(prompt)
-                    compiler_dpo_dataset_dict["chosen"].append(choice(index2positives[data['task_id'] - offset]))
+                    compiler_dpo_dataset_dict["chosen"].append('```python\n' + choice(index2positives[data['task_id'] - offset]) + '\n```')
                     if attempt['generation'].lstrip().startswith('def ') \
                             or attempt.lstrip().startswith('import ') \
                             or attempt.lstrip().startswith('from') \
