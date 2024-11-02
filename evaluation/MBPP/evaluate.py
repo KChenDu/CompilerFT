@@ -53,7 +53,7 @@ if __name__ == '__main__':
 
     model = args.model
     logger.info(f"loading model from {model}...")
-    generator = pipeline('text-generation', model, device=0, batch_size=args.batch_size, torch_dtype='auto')
+    generator = pipeline('text-generation', model, tokenizer="deepseek-ai/deepseek-coder-1.3b-base", device=0, batch_size=args.batch_size, torch_dtype='auto')
     logger.info(f"model loaded from {model}")
 
     logger.info("generating...")

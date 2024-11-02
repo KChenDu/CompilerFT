@@ -2,10 +2,11 @@ from os import cpu_count
 from datasets import load_dataset
 from setting import PROMPT_TEMPLATE
 from subprocess import run
+from context import time_limit, no_stdout
 from argparse import ArgumentParser
 from pathlib import Path
 from json import loads, dump
-from random import seed, choice
+from random import seed, choice, sample
 
 
 class PromptGenerator:
@@ -47,11 +48,20 @@ def is_compilable(code: str) -> bool:
     return output.returncode == 0
 
 
+def passes_tests(code: str, test_list: list[str]) -> bool:
+    try:
+        for test in test_list:
+            with time_limit(3.), no_stdout():
+                exec(code + test + '\n', {})
+            return True
+    except BaseException:
+        return False
+
+
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('path', type=str)
     parser.add_argument('--compiler', default='Codon', type=str)
-    parser.add_argument('--n_attempts', default=5, type=int)
     args = parser.parse_args()
 
     path = Path(args.path)
@@ -71,9 +81,9 @@ if __name__ == '__main__':
 
     train_examples = load_dataset("mbpp", split="train", num_proc=cpu_count())
     index2positives = [None] * len(train_examples)
-
     for i, train_example in enumerate(train_examples):
         index2positives[i] = [train_example['code']]
+    index2negatives = [None] * len(train_examples)
 
     offset = train_examples[0]['task_id']
     compiler_dpo_dataset_dict = {
@@ -91,7 +101,8 @@ if __name__ == '__main__':
                 continue
             prompt = prompt_generator.get_prompt(data['task_id'])
             generations = data['generation']
-            if len(generations) < 5 or is_compilable(generations[-1]):
+            if len(generations) < 5 or is_compilable(generations[-1]):  # If the last one is compilable
+                # Compiler dataset
                 for attempt in generations[:-1]:
                     compiler_dpo_dataset_dict["prompt"].append(prompt)
                     compiler_dpo_dataset_dict["chosen"].append("```python\n" + generations[-1].strip() + "\n```")
@@ -104,11 +115,20 @@ if __name__ == '__main__':
                         compiler_dpo_dataset_dict["rejected"].append('```python\n' + attempt.strip() + '\n```')
                     else:
                         compiler_dpo_dataset_dict["rejected"].append(attempt.strip())
-            else:
+                # Test dataset
+                if passes_tests(generations[-1], train_examples[data['task_id'] - offset]['test_list']):
+                    index2positives[data['task_id'] - offset].append(generations[-1])
+                else:
+                    if index2negatives[data['task_id'] - offset] is None:
+                        index2negatives[data['task_id'] - offset] = [generations[-1]]
+                    else:
+                        index2negatives[data['task_id'] - offset].append(generations[-1])
+            else:  # If no one is compilable
                 for attempt in generations:
+                    # Compiler dataset
                     compiler_dpo_dataset_dict["prompt"].append(prompt)
-                    compiler_dpo_dataset_dict["chosen"].append(choice(index2positives[data['task_id'] - offset]))
-                    if attempt['generation'].lstrip().startswith('def ') \
+                    compiler_dpo_dataset_dict["chosen"].append('```python\n' + choice(index2positives[data['task_id'] - offset]) + '\n```')
+                    if attempt.lstrip().startswith('def ') \
                             or attempt.lstrip().startswith('import ') \
                             or attempt.lstrip().startswith('from') \
                             or attempt.lstrip().startswith('@') \
@@ -117,6 +137,42 @@ if __name__ == '__main__':
                         compiler_dpo_dataset_dict["rejected"].append('```python\n' + attempt.strip() + '\n```')
                     else:
                         compiler_dpo_dataset_dict["rejected"].append(attempt.strip())
+                    # Test dataset
+                    if index2negatives[data['task_id'] - offset] is None:
+                        index2negatives[data['task_id'] - offset] = [attempt]
+                    else:
+                        index2negatives[data['task_id'] - offset].append(attempt)
 
     with open('compiler_dpo_dataset_dict.json', 'w') as file:
         dump(compiler_dpo_dataset_dict, file)
+
+    test_dpo_dataset_dict = {
+        "prompt": [],
+        "chosen": [],
+        "rejected": []
+    }
+
+    for i, negatives in enumerate(index2negatives):
+        if negatives is None:
+            continue
+        prompt = prompt_generator.get_prompt(i + offset)
+        for negative in negatives:
+            if len(index2positives[i]) < 2:
+                positives = index2positives[i]
+            else:
+                positives = sample(index2positives[i], 2)
+            for positive in positives:
+                test_dpo_dataset_dict["prompt"].append(prompt)
+                test_dpo_dataset_dict["chosen"].append('```python\n' + positive.strip() + '\n```')
+                if negative.lstrip().startswith('def ') \
+                        or negative.lstrip().startswith('import ') \
+                        or negative.lstrip().startswith('from') \
+                        or negative.lstrip().startswith('@') \
+                        or negative.lstrip().startswith('class ') \
+                        or negative.lstrip().startswith('#'):
+                    test_dpo_dataset_dict["rejected"].append('```python\n' + negative.strip() + '\n```')
+                else:
+                    test_dpo_dataset_dict["rejected"].append(negative.strip())
+
+    with open('test_dpo_dataset_dict.json', 'w') as file:
+        dump(test_dpo_dataset_dict, file)
